@@ -20,8 +20,8 @@ u8 load_resp_order_num[17];
 u8 load_resp_ok=0;
 
 u16 PageTotal,PageCur;
-const char Hz_StaTab[4][7]={"ÓÃ»§¿¨","¶þÎ¬Âë","Ô±¹¤¿¨","vinÂë"};
-const char Hz_TradingTab[2][5]={"Ê§°Ü","³É¹¦"};
+const char Hz_StaTab[4][7]={"用户卡","二维码","员工卡","vin码"};
+const char Hz_TradingTab[2][5]={"失败","成功"};
 
 
 /*******************************************************************************
