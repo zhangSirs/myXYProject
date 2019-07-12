@@ -1,0 +1,531 @@
+/*******************************************************************************
+*
+* File                : FlashOnChip.c
+* Hardware Environment: 
+* Build Environment   : uVision 5.13.0.0
+* Version             : V1.0
+* By                  : HeJun
+*
+*******************************************************************************/
+#include "include.h"
+
+RECORD_BUF RecBuf_A;
+RECORD_BUF RecBuf_B;
+u32 RecId;
+u16 RecordNum;
+u16 gred_card_SearchAddr;
+u16 up_load_Search_addr;
+u8 load_resp_order_num[17];
+
+u8 load_resp_ok=0;
+
+u16 PageTotal,PageCur;
+const char Hz_StaTab[4][7]={"ÓÃ»§¿¨","¶þÎ¬Âë","Ô±¹¤¿¨","vinÂë"};
+const char Hz_TradingTab[2][5]={"Ê§°Ü","³É¹¦"};
+
+
+/*******************************************************************************
+* Function Name  : None
+* Description    : None
+* Input          : None
+* Output         : None
+* Return         : None
+*******************************************************************************/
+void REC_StartRecord(u8 Channle,u32 Num)
+{
+	OS_ERR err;
+	u32 RecordAddr;
+	u32 TempVaule;
+	
+	if(Channle==A)
+	{
+		UserDataA.TradingTime=RTC_GetCounter();
+		RecBuf_A.record.which_gun = 1;
+		
+		if(UserDataA.StartMode==CardMode  )
+		{
+			memcpy(&RecBuf_A.card_num,&mt628_Add_A.card.card_num,sizeof(CARD_NUM));
+			memcpy(RecBuf_A.serial_num,charging_pile_num,sizeof(charging_pile_num));
+			RecBuf_A.serial_num[0] = A+1;
+			memcpy(&RecBuf_A.serial_num[1],(void*)&UserDataA.TradingTime,sizeof(UserDataA.TradingTime));		
+			RecBuf_A.StartMethod=0;
+			RecBuf_A.charging_mode = 1;
+		}
+		else if(UserDataA.StartMode==CardNetMode)
+		{
+			memcpy(&RecBuf_A.card_num,&mt628_Add_A.card.card_num,sizeof(CARD_NUM));
+			memcpy(RecBuf_A.serial_num,charging_pile_num,sizeof(charging_pile_num));
+			RecBuf_A.serial_num[0] = A+1;
+			memcpy(&RecBuf_A.serial_num[1],(void*)&UserDataA.TradingTime,sizeof(UserDataA.TradingTime));		
+			RecBuf_A.StartMethod=2;
+			RecBuf_A.charging_mode = 1;
+		}
+		else
+		{
+			memset(&RecBuf_A.card_num,0,sizeof(CARD_NUM));
+			memcpy(&RecBuf_A.record.order_num,start_respA.order_num,sizeof(RecBuf_A.record.order_num));
+			RecBuf_A.StartMethod=1;
+			RecBuf_A.charging_mode = 2;
+		}
+		
+		RecBuf_A.end_reason=UserDataA.ErrCode;
+		RTC_NetTime2Bcd(RecBuf_A.start_time);
+		RTC_NetTime2Bcd(RecBuf_A.end_time);
+		RecBuf_A.start_meter_kw = Meter_GetElec(A);
+		RecBuf_A.end_meter_kw = RecBuf_A.start_meter_kw;
+		RecBuf_A.used_kw=0;
+		RecBuf_A.all_cost = 0;
+		RecBuf_A.service_cost = 0;
+
+		memset(&RecBuf_A.record.chg_voltage,0,sizeof(RecBuf_A.record.chg_voltage));
+		memset(&RecBuf_A.record.chg_current,0,sizeof(RecBuf_A.record.chg_current));
+		memset(&RecBuf_A.record.used_kw,0,sizeof(RecBuf_A.record.used_kw));
+		RecBuf_A.record.res=0;
+		RecBuf_A.record.soc = 0;
+		memcpy(&RecBuf_A.record.vin_code,bms_data_A.msg_brm.car_identification,sizeof(RecBuf_A.record.vin_code));
+		
+		TempVaule=(u32)(Meter_GetElec(A)*100);
+		Hex32b_Bcd(RecBuf_A.record.total_kw_a,TempVaule,sizeof(RecBuf_A.record.total_kw_a));
+		TempVaule=(u32)(Meter_GetElec(B)*100);
+		Hex32b_Bcd(RecBuf_A.record.total_kw_b,TempVaule,sizeof(RecBuf_A.record.total_kw_b));
+		
+		RecordAddr=EEROM_ADDR_RECORD+Num%RECORD_MAX*RECORD_LEN;
+		UserDataA.RecordAddr=RecordAddr;
+		
+		RecBuf_A.Cleared=0xffff;
+		RecBuf_A.Uploaded=0xff5A;
+		
+		OSMutexPend(&iic_mutex,0,OS_OPT_PEND_BLOCKING,0,&err);
+		while(0==IIC2_WriteBuffer(At24C_Addr,RecordAddr,(u8*)&RecBuf_A,sizeof(RECORD_BUF)));
+		OSMutexPost(&iic_mutex,OS_OPT_POST_NONE,&err);
+	}
+	if(Channle==B)
+	{
+		UserDataB.TradingTime=RTC_GetCounter();
+		RecBuf_B.record.which_gun = 2;
+		
+		if(UserDataB.StartMode==CardMode  )
+		{
+			memcpy(&RecBuf_B.card_num,&mt628_Add_B.card.card_num,sizeof(CARD_NUM));
+			memcpy(RecBuf_B.serial_num,charging_pile_num,sizeof(charging_pile_num));
+			RecBuf_B.serial_num[0] = B+1;
+			memcpy(&RecBuf_B.serial_num[1],(void*)&UserDataB.TradingTime,sizeof(UserDataB.TradingTime));		
+			RecBuf_B.StartMethod=0;
+			RecBuf_B.charging_mode = 1;
+		}
+		else if(UserDataB.StartMode==CardNetMode)
+		{
+			memcpy(&RecBuf_B.card_num,&mt628_Add_B.card.card_num,sizeof(CARD_NUM));
+			memcpy(RecBuf_B.serial_num,charging_pile_num,sizeof(charging_pile_num));
+			RecBuf_B.serial_num[0] = B+1;
+			memcpy(&RecBuf_B.serial_num[1],(void*)&UserDataB.TradingTime,sizeof(UserDataB.TradingTime));		
+			RecBuf_B.StartMethod=2;
+			RecBuf_B.charging_mode = 1;
+		}
+		else
+		{
+			memset(&RecBuf_B.card_num,0,sizeof(CARD_NUM));
+			memcpy(&RecBuf_B.record.order_num,start_respB.order_num,sizeof(RecBuf_B.record.order_num));
+			RecBuf_B.StartMethod=1;
+			RecBuf_B.charging_mode = 2;
+		}
+		
+		RecBuf_B.end_reason=UserDataB.ErrCode;
+		RTC_NetTime2Bcd(RecBuf_B.start_time);
+		RTC_NetTime2Bcd(RecBuf_B.end_time);
+		RecBuf_B.start_meter_kw = Meter_GetElec(B);
+		RecBuf_B.end_meter_kw = RecBuf_B.start_meter_kw;
+		RecBuf_B.used_kw=0;
+		RecBuf_B.all_cost = 0;
+		RecBuf_B.service_cost = 0;
+		
+		memset(&RecBuf_B.record.chg_voltage,0,sizeof(RecBuf_B.record.chg_voltage));
+		memset(&RecBuf_B.record.chg_current,0,sizeof(RecBuf_B.record.chg_current));
+		memset(&RecBuf_B.record.used_kw,0,sizeof(RecBuf_B.record.used_kw));
+		RecBuf_B.record.res=0;
+		RecBuf_B.record.soc = 0;
+		memcpy(&RecBuf_B.record.vin_code,bms_data_B.msg_brm.car_identification,sizeof(RecBuf_B.record.vin_code));
+		
+		TempVaule=(u32)(Meter_GetElec(A)*100);
+		Hex32b_Bcd(RecBuf_B.record.total_kw_a,TempVaule,sizeof(RecBuf_B.record.total_kw_a));
+		TempVaule=(u32)(Meter_GetElec(B)*100);
+		Hex32b_Bcd(RecBuf_B.record.total_kw_b,TempVaule,sizeof(RecBuf_B.record.total_kw_b));
+	
+		RecordAddr=EEROM_ADDR_RECORD+Num%RECORD_MAX*RECORD_LEN;
+		UserDataB.RecordAddr=RecordAddr;
+		
+		RecBuf_B.Cleared=0xffff;
+		RecBuf_B.Uploaded=0xff5A;
+		
+		OSMutexPend(&iic_mutex,0,OS_OPT_PEND_BLOCKING,0,&err);
+		while(0==IIC2_WriteBuffer(At24C_Addr,RecordAddr,(u8*)&RecBuf_B,sizeof(RECORD_BUF)));
+		OSMutexPost(&iic_mutex,OS_OPT_POST_NONE,&err);
+	}
+	
+}
+
+/*******************************************************************************
+* Function Name  : None
+* Description    : None
+* Input          : None
+* Output         : None
+* Return         : None
+*******************************************************************************/
+void REC_UpdateRecord(u8 Channle)
+{
+	u16 UpdateAddr;
+	u32 TempVaule;
+	OS_ERR err;
+	
+	if(Channle==A)
+	{
+		TempVaule=(u32)(dwA.dw_charge_vol*100);
+		Hex32b_Bcd(RecBuf_A.record.chg_voltage,TempVaule,sizeof(RecBuf_A.record.chg_voltage));
+		TempVaule=(u32)(dwA.dw_charge_current*100);
+		Hex32b_Bcd(RecBuf_A.record.chg_current,TempVaule,sizeof(RecBuf_A.record.chg_current));
+		TempVaule=(u32)((UserDataA.Elec+0.005)*100);
+	
+		Hex32b_Bcd(RecBuf_A.record.used_kw,TempVaule,sizeof(RecBuf_A.record.used_kw));
+		RecBuf_A.record.res=0;
+		RecBuf_A.record.soc=bms_data_A.msg_bcs.soc;
+		memcpy(&RecBuf_A.record.vin_code,bms_data_A.msg_brm.car_identification,sizeof(RecBuf_A.record.vin_code));
+		TempVaule=(u32)(Meter_GetElec(A)*100);
+		Hex32b_Bcd(RecBuf_A.record.total_kw_a,TempVaule,sizeof(RecBuf_A.record.total_kw_a));
+		TempVaule=(u32)(Meter_GetElec(B)*100);
+		Hex32b_Bcd(RecBuf_A.record.total_kw_b,TempVaule,sizeof(RecBuf_A.record.total_kw_b));
+		RTC_NetTime2Bcd(RecBuf_A.end_time);
+		RecBuf_A.end_reason=UserDataA.ErrCode;
+		RecBuf_A.end_meter_kw = Meter_GetElec(A);
+		//RecBuf_A.used_kw=UserDataA.Elec*100;//190704
+		RecBuf_A.used_kw=(UserDataA.Elec+0.005)*100;//190704
+		RecBuf_A.all_cost=UserDataA.AllCost/100;
+		RecBuf_A.service_cost = UserDataA.ServiceCost/100;
+
+		
+		UpdateAddr=UserDataA.RecordAddr;
+		
+		OSMutexPend(&iic_mutex,0,OS_OPT_PEND_BLOCKING,0,&err);
+		while(0==IIC2_WriteBuffer(At24C_Addr,UpdateAddr,(u8*)&RecBuf_A,sizeof(RECORD_BUF)));
+		OSMutexPost(&iic_mutex,OS_OPT_POST_NONE,&err);
+		
+	}
+	else
+	{
+		TempVaule=(u32)(dwB.dw_charge_vol*100);
+		Hex32b_Bcd(RecBuf_B.record.chg_voltage,TempVaule,sizeof(RecBuf_B.record.chg_voltage));
+		TempVaule=(u32)(dwB.dw_charge_current*100);
+		Hex32b_Bcd(RecBuf_B.record.chg_current,TempVaule,sizeof(RecBuf_B.record.chg_current));
+		TempVaule=(u32)((UserDataB.Elec+0.005)*100);
+		Hex32b_Bcd(RecBuf_B.record.used_kw,TempVaule,sizeof(RecBuf_B.record.used_kw));
+		RecBuf_B.record.res=0;
+		RecBuf_B.record.soc=bms_data_B.msg_bcs.soc;
+		memcpy(&RecBuf_B.record.vin_code,bms_data_B.msg_brm.car_identification,sizeof(RecBuf_B.record.vin_code));
+		TempVaule=(u32)(Meter_GetElec(A)*100);
+		Hex32b_Bcd(RecBuf_B.record.total_kw_a,TempVaule,sizeof(RecBuf_B.record.total_kw_a));
+		TempVaule=(u32)(Meter_GetElec(B)*100);
+		Hex32b_Bcd(RecBuf_B.record.total_kw_b,TempVaule,sizeof(RecBuf_B.record.total_kw_b));
+		RTC_NetTime2Bcd(RecBuf_B.end_time);
+		RecBuf_B.end_reason=UserDataB.ErrCode;
+		RecBuf_B.end_meter_kw = Meter_GetElec(B);
+		//RecBuf_B.used_kw=UserDataB.Elec*100;//190704
+		RecBuf_B.used_kw=(UserDataB.Elec+0.005)*100;//190704
+		RecBuf_B.all_cost=UserDataB.AllCost/100;
+		RecBuf_B.service_cost = UserDataB.ServiceCost/100;
+		
+		UpdateAddr=UserDataB.RecordAddr;
+		
+		OSMutexPend(&iic_mutex,0,OS_OPT_PEND_BLOCKING,0,&err);
+		while(0==IIC2_WriteBuffer(At24C_Addr,UpdateAddr,(u8*)&RecBuf_B,sizeof(RECORD_BUF)));
+		OSMutexPost(&iic_mutex,OS_OPT_POST_NONE,&err);
+	}
+	
+}
+
+/*******************************************************************************
+* Function Name  : None
+* Description    : None
+* Input          : None
+* Output         : None
+* Return         : None
+*******************************************************************************/
+void REC_FlagEndReason(u8 Channle, u16 Addr)
+{
+	u8 EndReason;
+	OS_ERR err;
+	
+	u16 ReasonAddr=Addr;
+	
+	if(Channle==A) EndReason=UserDataA.ErrCode;
+	else EndReason=UserDataB.ErrCode;
+	
+	OSMutexPend(&iic_mutex,0,OS_OPT_PEND_BLOCKING,0,&err);
+	while(0==IIC2_WriteBuffer(At24C_Addr,ReasonAddr,(u8*)&EndReason,1));	
+	OSMutexPost(&iic_mutex,OS_OPT_POST_NONE,&err);
+}
+
+/*******************************************************************************
+* Function Name  : None
+* Description    : None
+* Input          : None
+* Output         : None
+* Return         : None
+*******************************************************************************/
+void REC_FlagCleared(u16 Addr)
+{
+	u16 Cleared=0;
+	OS_ERR err;
+	
+	u16 ClearAddr=Addr+3;
+	
+	OSMutexPend(&iic_mutex,0,OS_OPT_PEND_BLOCKING,0,&err);
+	while(0==IIC2_WriteBuffer(At24C_Addr,ClearAddr,(u8*)&Cleared,2));
+	OSMutexPost(&iic_mutex,OS_OPT_POST_NONE,&err);
+}
+
+/*******************************************************************************
+* Function Name  : None
+* Description    : None
+* Input          : None
+* Output         : None
+* Return         : None
+*******************************************************************************/
+void REC_FlagUploaded(u16 Addr)
+{
+	u16 Upload=0;
+	OS_ERR err;
+	
+	u16 UpLoadAddr=Addr+1;
+	
+	OSMutexPend(&iic_mutex,0,OS_OPT_PEND_BLOCKING,0,&err);
+	while(0==IIC2_WriteBuffer(At24C_Addr,UpLoadAddr,(u8*)&Upload,2));
+	OSMutexPost(&iic_mutex,OS_OPT_POST_NONE,&err);
+}
+
+/*******************************************************************************
+* Function Name  : Flash_RecordSumUp
+* Description    : None
+* Input          : None
+* Output         : None
+*******************************************************************************/
+void REC_RecordSumUp(void)
+{
+	if(SysSet.RecID>RECORD_MAX) RecordNum=RECORD_MAX;
+	else RecordNum=SysSet.RecID;
+	if(RecordNum==0)  PageTotal=1;
+	else PageTotal=1+(RecordNum-1)/5;
+	PageCur=1;
+}
+
+/*******************************************************************************
+* Function Name  : Flash_RecordPageUpdate
+* Description    : None
+* Input          : None
+* Output         : None
+*******************************************************************************/
+void REC_RecordPageUpdate(void)
+{
+	OS_ERR err;
+	u8 i=0;
+	u8 ErrId=0,FlagClear=0;
+	u8 CurPageRow=5;
+	u32 ReadAddr=0;
+	REAL_TIME start_time,end_time;
+	RECORD_BUF RecBuf;
+	
+	//µ±Ç°Ò³Ó¦ÏÔÊ¾ÐÐÊý
+	if(PageCur<PageTotal) CurPageRow=5;
+	else
+	{
+		CurPageRow=RecordNum%5;
+		if((CurPageRow==0)&&(RecordNum!=0)) CurPageRow=5;
+	}
+	
+	if(CurPageRow!=5)  memset(DispPageTable,0,sizeof(DispPageTable));	
+	Hex2Ascii_Right(pdw->PageInfo,3,PageCur,0);
+	pdw->PageInfo[3]='/';
+	Hex2Ascii(&pdw->PageInfo[4],PageTotal,0);
+
+	//µ±Ç°ÏÔÊ¾Ò³Ê×µØÖ·
+	ReadAddr=EEROM_ADDR_RECORD+(SysSet.RecID-1)%RECORD_MAX*RECORD_LEN-(PageCur-1)*5*RECORD_LEN;
+	for(i=0;i<CurPageRow;i++)
+	{
+		if(ReadAddr<EEROM_ADDR_RECORD) ReadAddr += RECORD_MAX;
+		
+		OSMutexPend(&iic_mutex,0,OS_OPT_PEND_BLOCKING,0,&err);
+		IIC2_ReadBuffer(At24C_Addr,ReadAddr,(u8*)&RecBuf,sizeof(RECORD_BUF));
+		OSMutexPost(&iic_mutex,OS_OPT_POST_NONE,&err);
+		
+		if(RecBuf.StartMethod==0 || RecBuf.StartMethod==2)
+		{
+			Bcd2Ascii(DispPageTable[i].dw_order_num,RecBuf.card_num,8);
+		}
+		else
+		{
+			OrderHex2Ascii(DispPageTable[i].dw_order_num,RecBuf.record.order_num);
+		}
+		memcpy(DispPageTable[i].dw_start_mode,(u8*)&Hz_StaTab[RecBuf.StartMethod][0],6);
+		DispPageTable[i].dw_charge_gun_num[0]=RecBuf.record.which_gun-1+'A';
+		if(RecBuf.Cleared) FlagClear=0;
+		else FlagClear=1;
+		if(RecBuf.StartMethod == 0)
+			memcpy(DispPageTable[i].dw_tran_result,&Hz_TradingTab[FlagClear][0],4);
+		else
+			memcpy(DispPageTable[i].dw_tran_result,&Hz_TradingTab[1][0],4);
+		TimerSwitch(RecBuf.start_time,&start_time);
+		TimerSwitch(RecBuf.end_time,&end_time);
+		RTC_DispTime2Ascii(DispPageTable[i].dw_tran_time,RTC_RealTime2Counter(&end_time));
+		Hex2Ascii(DispPageTable[i].dw_duration, (RTC_RealTime2Counter(&end_time)-RTC_RealTime2Counter(&start_time))/60,0);
+		
+		Hex2Ascii(DispPageTable[i].dw_elec, RecBuf.used_kw,2);
+		Hex2Ascii(DispPageTable[i].dw_cost, RecBuf.all_cost,2);
+		ErrId=RecBuf.end_reason;
+		if(ErrId>Err_GanFallOut) ErrId=Err_ReachSetting;
+		memcpy(DispPageTable[i].dw_stop_reason,Err_Table[ErrId].pStr,16);
+		ReadAddr -= RECORD_LEN;
+	}
+}
+
+/*******************************************************************************
+* Function Name  : None
+* Description    : None
+* Input          : None
+* Output         : None
+* Return         : None
+*******************************************************************************/
+u8 REC_SearchGreyCard(void)
+{
+	OS_ERR err;
+	u16 i=0;
+	u32 CardNumH=0,record_cardH = 0;
+	u32 CardNumL=0,record_cardL = 0;
+	u32 GardCardCost=0;
+	RECORD_BUF temp_rec_buf;
+	
+	memcpy((u8*)&CardNumH,(&pMt628_End->card.card_num),4);
+	memcpy((u8*)&CardNumL,(&pMt628_End->card.card_num.IC5),4);
+	
+	if(SysSet.RecID>RECORD_MAX) RecordNum=RECORD_MAX;
+	else RecordNum=SysSet.RecID;
+	gred_card_SearchAddr=EEROM_ADDR_RECORD+(SysSet.RecID-1)%RECORD_MAX*RECORD_LEN;
+	
+	for(i=0;i<RecordNum;i++)
+	{
+		if(gred_card_SearchAddr<EEROM_ADDR_RECORD) gred_card_SearchAddr += RECORD_MAX*RECORD_LEN;
+		
+		OSMutexPend(&iic_mutex,0,OS_OPT_PEND_BLOCKING,0,&err);
+		IIC2_ReadBuffer(At24C_Addr,gred_card_SearchAddr,(u8*)&temp_rec_buf,sizeof(RECORD_BUF));
+		OSMutexPost(&iic_mutex,OS_OPT_POST_NONE,&err);
+		
+		memcpy((u8*)&record_cardH,(&temp_rec_buf.card_num[0]),4);
+		memcpy((u8*)&record_cardL,(&temp_rec_buf.card_num[4]),4);
+		
+		if(CardNumL == record_cardL)
+		{
+			if(CardNumH == record_cardH && !mt628_is_used_by_a_b(record_cardH,record_cardL))
+			{
+				OSMutexPend(&iic_mutex,0,OS_OPT_PEND_BLOCKING,0,&err);
+				IIC2_ReadBuffer(At24C_Addr,gred_card_SearchAddr,(u8*)&temp_rec_buf,sizeof(RECORD_BUF));
+				OSMutexPost(&iic_mutex,OS_OPT_POST_NONE,&err);
+				
+				if(temp_rec_buf.Cleared==0xffff)
+				{
+					//*(u32*)(&pMt628_End->card.cost)=htonl(RecBuf.ChargeCost);
+					GardCardCost=temp_rec_buf.all_cost;
+					memcpy(&pMt628_End->card.cost,&GardCardCost,4);
+					//REC_FlagCleared(SearchAddr);
+					return 1;
+				}
+				/*else
+				{
+					return 0; //ËÑË÷µ½×îÐÂµÄ¼ÇÂ¼Î´»Ò¿¨£¬ÎÞÐëÔÙËÑ
+				}*/
+			}
+		}
+		gred_card_SearchAddr -= RECORD_LEN;
+	}
+	return 0;
+}
+
+
+/*******************************************************************************
+* Function Name  : None
+* Description    : None
+* Input          : None
+* Output         : None
+* Return         : None
+*******************************************************************************/
+u32 REC_SearchNoUpload(u8 gun)
+{
+	OS_ERR err;
+	u16 i=0;
+	u16 Upload=0;
+	u8 gun_id=0;
+	u16 SearchNum=SysSet.RecID;
+	
+	if(SearchNum==0) return 0;
+	if(SearchNum>5) SearchNum=5;
+	
+	up_load_Search_addr=EEROM_ADDR_RECORD+(SysSet.RecID-1)%RECORD_MAX*RECORD_LEN;
+
+	for(i=0;i<SearchNum;i++)
+	{
+		if(up_load_Search_addr<EEROM_ADDR_RECORD) up_load_Search_addr += RECORD_MAX*RECORD_LEN;
+		
+		OSMutexPend(&iic_mutex,0,OS_OPT_PEND_BLOCKING,0,&err);
+		IIC2_ReadBuffer(At24C_Addr,(up_load_Search_addr+1),(u8*)&Upload,2);
+		IIC2_ReadBuffer(At24C_Addr,(up_load_Search_addr+55),(u8*)&gun_id,1);
+		OSMutexPost(&iic_mutex,OS_OPT_POST_NONE,&err);
+		if(Upload == 0xff5A)
+		{ 
+			if( gun+1 == gun_id )
+			return up_load_Search_addr;
+		
+		}
+		up_load_Search_addr -= RECORD_LEN;
+	}
+	return 0;
+}
+
+
+/*******************************************************************************
+* Function Name  : None
+* Description    : None
+* Input          : None
+* Output         : None
+* Return         : None
+*******************************************************************************/
+void REC_SearchOrder(void)
+{
+	OS_ERR err;
+	u16 i=0;
+	u16 SearchNum=SysSet.RecID;
+	RECORD_BUF RecordBuf;
+	u16 SearchAddr;
+	
+	if(!load_resp_ok)  return;
+	load_resp_ok=0;
+	
+	if(SearchNum==0) return;
+	if(SearchNum>10) SearchNum=10;
+	
+	SearchAddr=EEROM_ADDR_RECORD+(SysSet.RecID-1)%RECORD_MAX*RECORD_LEN;
+	
+	for(i=0;i<SearchNum;i++)
+	{
+		if(SearchAddr<EEROM_ADDR_RECORD) SearchAddr += RECORD_MAX*RECORD_LEN;
+				
+		OSMutexPend(&iic_mutex,0,OS_OPT_PEND_BLOCKING,0,&err);
+		IIC2_ReadBuffer(At24C_Addr,SearchAddr,(u8*)&RecordBuf,sizeof(RECORD_BUF));
+		OSMutexPost(&iic_mutex,OS_OPT_POST_NONE,&err);
+		
+		if(serial_cmp(load_resp_order_num,(u8*)RecordBuf.record.order_num,sizeof(load_resp_order_num))==0  
+			&& RecordBuf.Uploaded == 0xff5a)
+		{
+			REC_FlagUploaded(SearchAddr);
+			return;
+		}
+		SearchAddr -= RECORD_LEN;
+	}
+}
+/******************* (C) COPYRIGHT 2012 WildFire Team *****END OF FILE************/
+
